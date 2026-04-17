@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Token Flow Tracker V2</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #080d0b; color: #b8cdc8; font-family: sans-serif; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { text-align: center; margin-bottom: 30px; border-bottom: 1px solid #1a3a2a; padding-bottom: 20px; }
+        input { width: 100%; background: #111; border: 1px solid #1a3a2a; border-radius: 10px; padding: 15px; color: #fff; margin-bottom: 10px; outline: none; font-size: 14px; }
+        button { width: 100%; background: linear-gradient(135deg, #1a5c4a, #0d3020); border: 1px solid #2a7a5a; border-radius: 10px; padding: 15px; color: #63cab7; cursor: pointer; font-weight: bold; font-size: 16px; }
+        button:disabled { opacity: 0.5; }
+        .card { background: #0a110e; border: 1px solid #112018; border-radius: 15px; padding: 20px; margin-top: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th { color: #63cab7; padding: 12px; border-bottom: 2px solid #1a3a2a; text-align: right; font-size: 13px; }
+        td { padding: 12px; border-bottom: 1px solid #0d1a14; font-size: 13px; }
+        .status-badge { padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useCallback } = React;
+
+        const RELAY = "0xf70da97812CB96acDF810712Aa562db8dfA3dbEF".toLowerCase();
+        const TOKEN = "0xb29de8455ACd47bb10755a133c54d0E595c6FFFF";
+        // استخدام رابط V2 الرسمي
+        const BSC_API_V2 = "https://api.bscscan.com/api/v2";
+
+        const fmtAddr = (a) => a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "—";
+
+        function App() {
+            const [apiKey, setApiKey] = useState("");
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState("");
+            const [wallets, setWallets] = useState([]);
+
+            const analyze = useCallback(async () => {
+                if (!apiKey.trim()) { setError("الرجاء إدخال API Key"); return; }
+                setLoading(true); setError(""); setWallets([]);
+
+                try {
+                    // إضافة chainid=56 لضمان توجيه الطلب لشبكة BSC بشكل صحيح في V2
+                    const url = `${BSC_API_V2}?chainid=56&module=account&action=tokentx&contractaddress=${TOKEN}&address=${RELAY}&sort=desc&apikey=${apiKey}`;
+                    
+                    const response = await fetch(url);
+                    
+                    // فحص إذا كان الرد ناجحاً قبل محاولة تحويله لـ JSON
+                    if (!response.ok) throw new Error("فشل الاتصال بالسيرفر");
+
+                    const data = await response.json();
+
+                    if (data.status !== "1") throw new Error(data.message || "خطأ في المفتاح أو البيانات");
+
+                    const results = data.result || [];
+                    const dec = results[0]?.tokenDecimal || 18;
+                    
+                    const walletMap = {};
+                    results.filter(t => t.from.toLowerCase() === RELAY).forEach(tx => {
+                        const addr = tx.to.toLowerCase();
+                        if (addr === RELAY) return;
+                        if (!walletMap[addr]) walletMap[addr] = { address: tx.to, total: 0 };
+                        walletMap[addr].total += parseFloat(tx.value) / Math.pow(10, dec);
+                    });
+
+                    setWallets(Object.values(walletMap).sort((a, b) => b.total - a.total).slice(0, 20));
+
+                } catch (e) {
+                    setError("حدث خطأ: " + e.message);
+                } finally {
+                    setLoading(false);
+                }
+            }, [apiKey]);
+
+            return (
+                <div className="container">
+                    <div className="header">
+                        <h2 style={{color: '#63cab7', margin: 0}}>TRACKER V2 ACTIVE</h2>
+                        <p style={{fontSize: '11px', opacity: 0.6}}>نظام تتبع المحافظ المحدث</p>
+                    </div>
+
+                    <input 
+                        value={apiKey} 
+                        onChange={e => setApiKey(e.target.value)} 
+                        placeholder="أدخل BscScan API Key V2 هنا..." 
+                    />
+                    
+                    <button onClick={analyze} disabled={loading}>
+                        {loading ? "جاري جلب البيانات من V2..." : "بدء التحليل المتقدم"}
+                    </button>
+
+                    {error && <div className="card" style={{borderColor: '#ff6b6b', color: '#ff6b6b', textAlign: 'center'}}>{error}</div>}
+
+                    {wallets.length > 0 && (
+                        <div className="card">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>المحفظة</th>
+                                        <th>الكمية</th>
+                                        <th>الحالة</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {wallets.map(w => (
+                                        <tr key={w.address}>
+                                            <td style={{fontFamily: 'monospace'}}>{fmtAddr(w.address)}</td>
+                                            <td style={{color: '#63cab7'}}>{Math.round(w.total).toLocaleString()}</td>
+                                            <td><span className="status-badge" style={{background: '#1a3a2a', color: '#50c878'}}>نشط</span></td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
